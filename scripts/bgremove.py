@@ -41,7 +41,6 @@ class Script(scripts.Script):
         ### from sticker_process.run() ###
         output = bgutils.resize(input, 1280)
         output = bgutils.gamma(output, 0.8, 0.95)
-        output = output.filter(ImageFilter.UnsharpMask(3, 150, 2))
         # output = bgutils.remove_background_1(output)
         output = ImageModule.fromarray(self.remover.process(output))
         output = bgutils.crop(output)
@@ -51,6 +50,7 @@ class Script(scripts.Script):
         output = bgutils.fit_to_size(output, 768) #(255,0,255)
         # output = ImageModule.alpha_composite(ImageModule.new('RGBA', output.size, (255, 255, 255)), output)
         output = output.convert('RGB')
+        output = output.filter(ImageFilter.UnsharpMask(3, 150, 2))
         
         p.init_images[0] = output
         return p
