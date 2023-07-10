@@ -1,6 +1,9 @@
 import math
+from typing import Tuple
 from PIL import Image as ImageModule, ImageFilter, ImageDraw #, ImageFont, ImageOps
 from PIL.Image import Image
+from deepface import DeepFace
+import numpy as np
 # import cv2 as cv
 # import numpy
 
@@ -188,14 +191,13 @@ def round_corners(input: Image, rad):
     output.paste(input, (0, 0), alpha)
     return output
 
-def resize(input: Image, size):
+def resize(input: Image, size: int):
     w0, h0 = input.size
-    if w0 == size or h0 == size:
+    if size == max(w0, h0):
         return input
     else:
-        k = size/w0 if w0 > h0 else size/h0
-        w1 = round(k * w0)
-        h1 = round(k * h0)
+        k = size / max(w0, h0)
+        w1, h1 = round(w0 * k), round(h0 * k)
         return input.resize((w1, h1), ImageModule.LANCZOS)
 
 def fit_to_size(input: Image, size: int, bg_color = (255,255,255,255)):
@@ -203,11 +205,48 @@ def fit_to_size(input: Image, size: int, bg_color = (255,255,255,255)):
     result = ImageModule.new(input.mode, (size,size), bg_color)
     x = (size - output.width) // 2
     y = (size - output.height) // 2
-    result.paste(output, (x,y), output.getchannel(3).point(lambda x: x if x>64 else 0))
+    if output.mode == 'RGBA':
+        result.paste(output, (x,y), output.getchannel(3).point(lambda x: x if x>64 else 0))
+    else:
+        result.paste(output, (x,y))
     return result
 
 def gamma(input: Image, a = 1.1, b = 0.9):
     return input.point(lambda x: ((x/255)**a)*255*b)
+
+def face2prompt(face):
+    is_minor = face['age'] < 13
+    male = 'kid boy' if is_minor else 'man'
+    female = 'kid girl' if is_minor else 'woman'
+    gender = male if face['dominant_gender'] == 'Man' else female
+    # emotion = '' if face['dominant_emotion'] == 'neutral' else face['dominant_emotion']
+    return gender # emotion+' '+ # face['dominant_race']+' '+
+
+def detect_faces(input: Image) -> Tuple[str, list]: 
+    #torch.cuda.empty_cache() # ???
+    try:
+        input_np = np.array(input)
+        faces = DeepFace.analyze(
+            img_path=input_np,  
+            actions=['age', 'gender'], 
+            detector_backend="mtcnn",
+            enforce_detection=True #False
+        ) # 'race', 'emotion' # , detector_backend="retinaface" # ssd
+        # print('[detect_faces]', faces)
+        faces2 = sorted(faces, key=lambda x: x['region']['w'], reverse=True)[0:2]
+        faces2.sort(key=lambda x: x['region']['x'])
+        print('[detect_faces] faces2', faces2)
+        # face_prompt = ' and '.join(map(face2prompt, faces))
+        if len(faces2) == 2:
+            face_prompt = face2prompt(faces2[0]) + ' on left and ' + face2prompt(faces2[1]) + ' on right'
+        elif len(faces2) == 1:
+            face_prompt = face2prompt(faces2[0])
+        else:
+            face_prompt = ''
+        return (face_prompt, faces)
+    except Exception as err:
+        print('[detect_faces] ERROR: Couldn`t detect face', err)
+        return ('', [])
 
 # def sharpen(input: Image):
     # cv2::GaussianBlur(frame, image, cv::Size(0, 0), 3);

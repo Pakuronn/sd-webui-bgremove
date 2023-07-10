@@ -63,7 +63,7 @@ class Remover:
 
         self.background = None
     
-    def process(self, img: Image.Image, type='rgba'):
+    def process(self, img: Image.Image, type='rgba', blur=15):
         shape = img.size[::-1]            
         x = self.transform(img)
         x = x.unsqueeze(0)
@@ -90,7 +90,7 @@ class Remover:
             bg = np.stack([np.ones_like(pred)] * 3, axis=-1) * [120, 255, 155]
             img = img * pred[..., np.newaxis] + bg * (1 - pred[..., np.newaxis])
         elif type == 'blur':
-            img = img * pred[..., np.newaxis] + cv2.GaussianBlur(img, (0, 0), 15) * (1 - pred[..., np.newaxis])
+            img = img * pred[..., np.newaxis] + cv2.GaussianBlur(img, (0, 0), blur) * (1 - pred[..., np.newaxis])
         elif type == 'overlay':
             bg = (np.stack([np.ones_like(pred)] * 3, axis=-1) * [120, 255, 155] + img) // 2
             img = bg * pred[..., np.newaxis] + img * (1 - pred[..., np.newaxis])
