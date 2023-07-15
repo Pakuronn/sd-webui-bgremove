@@ -4,9 +4,10 @@ from typing import TypedDict
 import numpy as np
 import gradio as gr
 from fastapi import FastAPI, Body, Response
-from PIL import ImageFilter, Image as ImageModule, ImageStat, ImageOps
+from PIL import ImageFilter, Image as ImageModule, ImageStat, ImageOps, ImageChops
 import traceback
 import sys
+import platform
 
 from modules.api.models import *
 from modules.api import api, models
@@ -16,6 +17,9 @@ from modules.call_queue import queue_lock  # noqa: F401
 from scripts.Remover import Remover
 from scripts.bgutils import detect_faces, gamma, resize, crop, fit_to_size
 from scripts.face_detect import FaceDetectConfig, FaceMode, findFaces, findFaces2
+
+HOSTNAME_PENS = 'DESKTOP-0PN01Q5'
+IS_PROD = platform.node() != HOSTNAME_PENS
 
 class dotdict(dict):
     __getattr__ = dict.get
@@ -104,18 +108,45 @@ def base64_to_nparray(b64: str):
 def smoothclamp(x: float, mi: float, mx: float): 
     return mi + (mx-mi) * (lambda t: np.where(t<0, 0, np.where(t<=1, 3*t**2-2*t**3, 1)))((x-mi)/(mx-mi))
 
+# def is_grayscale0(input: ImageModule.Image):
+#     stat = ImageStat.Stat(input)
+#     avgsum = sum(stat.sum)/3
+#     delta = 0.01 * avgsum
+#     return True if abs(sum(stat.sum)/3 - stat.sum[0]) < delta else False
+
 def is_grayscale(input: ImageModule.Image):
+    treshold = 1
+    size = input.size
     stat = ImageStat.Stat(input)
-    avgsum = sum(stat.sum)/3
-    delta = 0.01 * avgsum
-    return True if abs(sum(stat.sum)/3 - stat.sum[0]) < delta else False
+    area = size[0]*size[1]
+    r = stat.sum[0] / area
+    g = stat.sum[1] / area
+    b = stat.sum[2] / area
+    diff = max(abs(r-b), abs(r-g), abs(g-b))
+    # print('[is_grayscale]', round(r,2), round(g,2), round(b,2), round(diff,2))
+    return True if diff < treshold else False
+
+def is_grayscale_masked(input: ImageModule.Image, mask: ImageModule.Image):
+    treshold = 5
+    stat = ImageStat.Stat(input, mask)
+    mask_stat = ImageStat.Stat(mask)
+    area = mask_stat.sum[0] / 255
+    r = stat.sum[0] / area
+    g = stat.sum[1] / area
+    b = stat.sum[2] / area
+    diff = max(abs(r-b), abs(r-g), abs(g-b))
+    # print('[is_grayscale_masked]', area)
+    # print(round(r,2), round(g,2), round(b,2), round(diff,2), treshold)
+    return True if diff < treshold else False
 
 def bgremove_api(_: gr.Blocks, app: FastAPI):
 
     DETECT_IMAGE_SIZE = 1280
     STICKER_IMAGE_SIZE = 768
     PASS1_IMAGE_SIZE = 768
-    PASS2_IMAGE_SIZE = 1024
+    PASS2_IMAGE_SIZE = 1280 if IS_PROD else 1024
+
+    print('[bgremove_api.init] IS_PROD = ', IS_PROD, PASS1_IMAGE_SIZE, PASS2_IMAGE_SIZE)
 
     sdapi = api.Api(app, queue_lock)
     remover = Remover()
@@ -134,8 +165,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
 
 
     def do_pass1(
-        width: int, 
-        height: int, 
+        scale: float, 
         prompt: str, 
         negative_prompt: str, 
         image_sd: ImageModule.Image, 
@@ -149,11 +179,14 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         # "inpaint_full_res": true,
         # "inpaint_full_res_padding": 0,
         print('[do_pass1]', image_sd.size, image_cn.size, '-' if image_mask == None else image_mask.size)
+        width, height = image_sd.size
         req = models.StableDiffusionImg2ImgProcessingAPI()
         req.init_images = [pil_to_base64(image_sd)]
         req.cfg_scale = 7
-        req.width = width
-        req.height = height
+        # req.width = width
+        # req.height = height
+        req.width = round(width * scale / 8) * 8
+        req.height = round(height * scale / 8) * 8
         req.prompt = prompt #prompt_patched
         req.negative_prompt = negative_prompt
         req.steps = sd['steps'] if 'steps' in sd else 25
@@ -229,13 +262,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         print('[/bgremove/avatar] pass2', round(100*(face_height / width)), req2.prompt)
         result2 = sdapi.img2imgapi(req2)
         pass2_output = result2.images[0]
-
-        ### make image grayscale if needed
-        if is_grayscale(input_image):
-            pass2_output = ImageOps.grayscale(base64_to_pil(pass2_output))
-            pass2_output = pil_to_base64(pass2_output)
         return pass2_output
-
 
     def make_faces_mask(input_image_pil: ImageModule.Image):
         print("[/bgremove/avatar] build face mask")
@@ -292,6 +319,8 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
             else:
                 mask_pil, faces_count, face_height = None, 0, 0
 
+            pass2_needed = faces_restore and mask_pil and faces_count > 0
+
             ### fine-tune prompt
             if faces_count > 0:
                 print('[/bgremove/avatar] fine-tune prompt', faces_count)
@@ -323,10 +352,10 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
             cn_image_b64 = pil_to_base64(cn_image_pil)
 
             ### PASS 1
-            width, height = sd_image_pil.size
+
+            scale = 1 if pass2_needed else PASS2_IMAGE_SIZE / PASS1_IMAGE_SIZE
             pass1_output, pass1_seed = do_pass1(
-                width, 
-                height, 
+                scale,
                 prompt = prompt_patched, 
                 negative_prompt = negative_prompt, 
                 image_sd = sd_image_pil,
@@ -343,10 +372,15 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
                 "" if mask_pil == None else pil_to_base64(mask_pil)
             ]
 
-            if faces_restore and faces_count > 0: 
+            if pass2_needed: 
                 ### PASS 2
                 scale = 1 if bg_remove else PASS2_IMAGE_SIZE / PASS1_IMAGE_SIZE
                 pass2_output = do_pass2(scale, prompt, face_height, sd_image_pil, pass1_output, pass1_seed)
+                ### make image grayscale if needed
+                # faces_image = sd_image_pil if not mask_pil else ImageChops.multiply(sd_image_pil, mask_pil.convert('RGB'))
+                if mask_pil and is_grayscale_masked(sd_image_pil, mask_pil):
+                    pass2_output = ImageOps.grayscale(base64_to_pil(pass2_output))
+                    pass2_output = pil_to_base64(pass2_output)
                 output_image = pass2_output
                 debug_images = [pass1_output] + debug_images
 
