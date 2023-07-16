@@ -353,7 +353,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
 
             ### PASS 1
 
-            scale = 1 if pass2_needed else PASS2_IMAGE_SIZE / PASS1_IMAGE_SIZE
+            scale = 1 if pass2_needed or bg_remove else PASS2_IMAGE_SIZE / PASS1_IMAGE_SIZE
             pass1_output, pass1_seed = do_pass1(
                 scale,
                 prompt = prompt_patched, 
