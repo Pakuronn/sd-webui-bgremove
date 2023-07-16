@@ -144,7 +144,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
     DETECT_IMAGE_SIZE = 1280
     STICKER_IMAGE_SIZE = 768
     PASS1_IMAGE_SIZE = 768
-    PASS2_IMAGE_SIZE = 768 if IS_PROD else 1024
+    PASS2_IMAGE_SIZE = 1024 if IS_PROD else 1024
 
     print('[bgremove_api.init] IS_PROD = ', IS_PROD, PASS1_IMAGE_SIZE, PASS2_IMAGE_SIZE)
 
