@@ -250,7 +250,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         req2.negative_prompt = 'cyborg, robot eyes, crossed eyes, tattoos, cinematic, grayscale, (deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, (mutated hands and fingers:1.4), disconnected limbs, mutation, mutated, disgusting, blurry, amputation, ugly'
         req2.steps = 10
         req2.cfg_scale = 7
-        req2.sampler_index = 'DPM++ 2M SDE Karras'
+        req2.sampler_index = 'DPM++ 2M Karras' #pens: 'DPM++ 2M SDE Karras'
         req2.denoising_strength = 0.25 #denoising_strength
         req2.width = round(width * scale / 8) * 8
         req2.height = round(height * scale / 8) * 8
