@@ -295,6 +295,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         bg_blur_radius: int = Body(0, title="Blur Radius"),
         faces_restore: bool = Body(False, title="Restore faces from source photo"),
         debug: bool = Body(True, title="Return intermediate images"),
+        detect_gender: bool = Body(False, title="Fine-tune prompt based on detected gender and age")
     ) -> AvatarResponse:
         try:
             # input_image_pil = ImageModule.fromarray(base64_to_nparray(input_image))
@@ -322,7 +323,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
             pass2_needed = faces_restore and mask_pil and faces_count > 0
 
             ### fine-tune prompt
-            if faces_count > 0 and not IS_PROD:
+            if faces_count > 0 and detect_gender:
                 print('[/bgremove/avatar] fine-tune prompt', faces_count)
                 prompt_faces, _ = detect_faces(input_image_pil)
                 prompt_patched = '('+prompt_faces+'), ' + prompt if prompt_faces else prompt
