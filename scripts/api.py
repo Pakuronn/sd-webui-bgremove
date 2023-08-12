@@ -26,16 +26,6 @@ class dotdict(dict):
     __setattr__ = dict.__setitem__ #type: ignore
     __delattr__ = dict.__delitem__ #type: ignore
 
-# def encode_to_base64(image: Any):
-#     if type(image) is str:
-#         return image
-#     elif type(image) is ImageModule.Image:
-#         return api.encode_pil_to_base64(image)
-#     elif type(image) is np.ndarray:
-#         return nparray_to_base64(image)
-#     else:
-#         return ""
-
 def nparray_to_base64(image: np.ndarray):
     return pil_to_base64(ImageModule.fromarray(image))
 
@@ -52,17 +42,6 @@ def base64_to_pil(b64: str):
 def base64_to_nparray(b64: str):
     # Convert a base64 image into the image type the extension uses
     return np.array(api.decode_base64_to_image(b64)).astype('uint8')
-
-# def resize(input: ImageModule.Image, size: int):
-#     w0, h0 = input.size
-#     if w0 == size or h0 == size:
-#         return input
-#     else:
-#         k = size/w0 if w0 > h0 else size/h0
-#         w1 = round(k * w0)
-#         h1 = round(k * h0)
-#         return input.resize((w1, h1), ImageModule.LANCZOS)
-
 
 # txt2img_request = {
 #     "batch_size": 1,
@@ -108,32 +87,14 @@ def base64_to_nparray(b64: str):
 def smoothclamp(x: float, mi: float, mx: float): 
     return mi + (mx-mi) * (lambda t: np.where(t<0, 0, np.where(t<=1, 3*t**2-2*t**3, 1)))((x-mi)/(mx-mi))
 
-# def is_grayscale0(input: ImageModule.Image):
-#     stat = ImageStat.Stat(input)
-#     avgsum = sum(stat.sum)/3
-#     delta = 0.01 * avgsum
-#     return True if abs(sum(stat.sum)/3 - stat.sum[0]) < delta else False
-
-def is_grayscale(input: ImageModule.Image):
-    treshold = 1
-    size = input.size
-    stat = ImageStat.Stat(input)
-    area = size[0]*size[1]
-    r = stat.sum[0] / area
-    g = stat.sum[1] / area
-    b = stat.sum[2] / area
-    diff = max(abs(r-b), abs(r-g), abs(g-b))
-    # print('[is_grayscale]', round(r,2), round(g,2), round(b,2), round(diff,2))
-    return True if diff < treshold else False
-
 def is_grayscale_masked(input: ImageModule.Image, mask: ImageModule.Image):
-    treshold = 5
+    treshold: float = 5
     stat = ImageStat.Stat(input, mask)
     mask_stat = ImageStat.Stat(mask)
     area = mask_stat.sum[0] / 255
-    r = stat.sum[0] / area
-    g = stat.sum[1] / area
-    b = stat.sum[2] / area
+    r: float = stat.sum[0] / area
+    g: float = stat.sum[1] / area
+    b: float = stat.sum[2] / area
     diff = max(abs(r-b), abs(r-g), abs(g-b))
     # print('[is_grayscale_masked]', area)
     # print(round(r,2), round(g,2), round(b,2), round(diff,2), treshold)
@@ -157,6 +118,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
 
     class AvatarResponse(TypedDict, total=False):
         images: list[str]
+        seed: int
         _req: Any
         _err: Any
 
@@ -199,8 +161,8 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         ### set inpaint mode if needed
         if image_mask != None:
             req.mask = pil_to_base64(image_mask)
-            req.mask_blur = round(face_height * 0.15) #44
-            req.inpainting_fill = 0
+            req.mask_blur = round(face_height * 0.15)
+            req.inpainting_fill = 1 # !!! FIXED
             req.inpainting_mask_invert = 1
 
         req.alwayson_scripts = {
@@ -255,6 +217,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         req2.width = round(width * scale / 8) * 8
         req2.height = round(height * scale / 8) * 8
         req2.init_images = [pass2_input_b64]
+        # req2.restore_faces = True
         if seed:
             req2.seed = seed
 
@@ -264,20 +227,20 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         pass2_output = result2.images[0]
         return pass2_output
 
-    def make_faces_mask(input_image_pil: ImageModule.Image):
+    def make_faces_mask(input_image_pil: ImageModule.Image, size: int):
         print("[/bgremove/avatar] build face mask")
         width, height = input_image_pil.size
         facecfg = FaceDetectConfig(FaceMode.YUNET)
         npmasks, faces_bbox, _ = findFaces2(facecfg, input_image_pil, True, height * 0.1)
         faces_count = len(faces_bbox)
         if len(npmasks) > 0:
-            mask_pil = resize(ImageModule.fromarray(npmasks[0]), PASS1_IMAGE_SIZE)
+            mask_pil = resize(ImageModule.fromarray(npmasks[0]), size)
         else:
             mask_pil = None
         print("[/bgremove/avatar] faces_bbox", faces_bbox)
         if faces_count > 0:
             biggest_face = sorted(faces_bbox, key=lambda x: x[3], reverse=True)[0]
-            face_height = biggest_face[3] / DETECT_IMAGE_SIZE * PASS1_IMAGE_SIZE
+            face_height = biggest_face[3] / DETECT_IMAGE_SIZE * size
         else:
             face_height = 0
         return mask_pil, faces_count, face_height
@@ -288,6 +251,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         response: Response,
         input_image: str = Body("", title='Input Image'),
         prompt: str = Body("man, steampunk", title="Prompt"),
+        prompt_pass2: str = Body("", title="Prompt for Pass-2"),
         negative_prompt: str = Body("", title="Prompt"),
         sd: dict[str, Any] = Body({}, title="Stable Diffusion text2img parameters"),
         controlnet: dict[str, Any] = Body({}, title="ControlNet parameters"),
@@ -295,10 +259,13 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         bg_blur_radius: int = Body(0, title="Blur Radius"),
         faces_restore: bool = Body(False, title="Restore faces from source photo"),
         debug: bool = Body(True, title="Return intermediate images"),
-        detect_gender: bool = Body(False, title="Fine-tune prompt based on detected gender and age")
+        detect_gender: bool = Body(False, title="Fine-tune prompt based on detected gender and age"),
+        output_size: int = Body(PASS2_IMAGE_SIZE, title="Output size (bigger side, default is 1024)")
     ) -> AvatarResponse:
         try:
             # input_image_pil = ImageModule.fromarray(base64_to_nparray(input_image))
+            pass1_size = 768 if output_size < 1200 else 1024
+            print('[/bgremove/avatar] STARTED', sd['seed'], pass1_size, output_size, prompt_pass2)
             input_image_pil = base64_to_pil(input_image)
             input_image_pil = resize(input_image_pil, DETECT_IMAGE_SIZE)
 
@@ -316,7 +283,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
 
             ### build face mask for inpaint
             if faces_restore:
-                mask_pil, faces_count, face_height = make_faces_mask(input_image_pil)
+                mask_pil, faces_count, face_height = make_faces_mask(input_image_pil, pass1_size)
             else:
                 mask_pil, faces_count, face_height = None, 0, 0
 
@@ -338,23 +305,23 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
                 # avatar:
                 # blur background for controlnet input
                 print("[/bgremove/avatar] blur background for controlnet input")
-                sd_image_pil = resize(input_image_pil, PASS1_IMAGE_SIZE)
+                sd_image_pil = resize(input_image_pil, pass1_size)
                 cn_image_pil = ImageModule.fromarray(remover.process(input_image_pil, 'blur', 30))
                 cn_image_pil = cn_image_pil.filter(ImageFilter.UnsharpMask(3, 150, 2))
-                cn_image_pil = resize(cn_image_pil, PASS1_IMAGE_SIZE)
+                cn_image_pil = resize(cn_image_pil, pass1_size)
                 if mask_pil:
-                    mask_pil = resize(mask_pil, PASS1_IMAGE_SIZE)
+                    mask_pil = resize(mask_pil, pass1_size)
             else: 
                 # avatar:
-                sd_image_pil = resize(input_image_pil, PASS1_IMAGE_SIZE)
+                sd_image_pil = resize(input_image_pil, pass1_size)
                 cn_image_pil = sd_image_pil
                 if mask_pil:
-                    mask_pil = resize(mask_pil, PASS1_IMAGE_SIZE)
+                    mask_pil = resize(mask_pil, pass1_size)
             cn_image_b64 = pil_to_base64(cn_image_pil)
 
             ### PASS 1
 
-            scale = 1 if pass2_needed or bg_remove else PASS2_IMAGE_SIZE / PASS1_IMAGE_SIZE
+            scale = 1 if pass2_needed or bg_remove else output_size / pass1_size
             pass1_output, pass1_seed = do_pass1(
                 scale,
                 prompt = prompt_patched, 
@@ -375,8 +342,15 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
 
             if pass2_needed: 
                 ### PASS 2
-                scale = 1 if bg_remove else PASS2_IMAGE_SIZE / PASS1_IMAGE_SIZE
-                pass2_output = do_pass2(scale, prompt, face_height, sd_image_pil, pass1_output, pass1_seed)
+                scale = 1 if bg_remove else output_size / pass1_size
+                pass2_output = do_pass2(
+                    scale, 
+                    prompt if prompt_pass2 == "" else prompt_pass2, 
+                    face_height, 
+                    sd_image_pil, 
+                    pass1_output, 
+                    pass1_seed
+                )
                 ### make image grayscale if needed
                 # faces_image = sd_image_pil if not mask_pil else ImageChops.multiply(sd_image_pil, mask_pil.convert('RGB'))
                 if mask_pil and is_grayscale_masked(sd_image_pil, mask_pil):
@@ -393,7 +367,8 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
                 debug_images = [pil_to_base64(bgmask_pil)] + debug_images
 
             return {
-                "images": [output_image] + debug_images if debug else [output_image]
+                "images": [output_image] + debug_images if debug else [output_image],
+                "seed": pass1_seed
             }
 
         except Exception as err:
