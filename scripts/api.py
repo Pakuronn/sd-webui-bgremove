@@ -264,7 +264,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
     ) -> AvatarResponse:
         try:
             # input_image_pil = ImageModule.fromarray(base64_to_nparray(input_image))
-            pass1_size = 768 if output_size < 1200 else 1024
+            pass1_size = 768 if output_size < 1200 else 960
             print('[/bgremove/avatar] STARTED', pass1_size, output_size, prompt_pass2)
             input_image_pil = base64_to_pil(input_image)
             input_image_pil = resize(input_image_pil, DETECT_IMAGE_SIZE)
