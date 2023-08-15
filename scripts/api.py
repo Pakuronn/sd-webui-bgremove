@@ -214,9 +214,9 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         req2.sampler_index = 'DPM++ 2M Karras' #pens: 'DPM++ 2M SDE Karras'
         req2.width = round(width * scale / 8) * 8
         req2.height = round(height * scale / 8) * 8
-        is_hd = max(req2.width, req2.height) > 1200
-        req2.denoising_strength = 0.3 if is_hd else 0.25
-        req2.steps = 12 if is_hd else 10
+        is_small = max(req2.width, req2.height) < 800
+        req2.denoising_strength = 0.2 if is_small else 0.25
+        req2.steps = 10
         req2.init_images = [pass2_input_b64]
         # req2.restore_faces = True
         if seed:
