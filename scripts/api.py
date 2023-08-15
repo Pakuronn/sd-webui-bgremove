@@ -210,12 +210,13 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         req2 = models.StableDiffusionImg2ImgProcessingAPI()
         req2.prompt = prompt #'8 k, sharp focus, cinematic lighting, concept art, comic style, digital painting, (intricate details:0.9), (hdr, hyperdetailed:1.2)'
         req2.negative_prompt = 'cyborg, robot eyes, crossed eyes, tattoos, cinematic, grayscale, (deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, (mutated hands and fingers:1.4), disconnected limbs, mutation, mutated, disgusting, blurry, amputation, ugly'
-        req2.steps = 10
         req2.cfg_scale = 7
         req2.sampler_index = 'DPM++ 2M Karras' #pens: 'DPM++ 2M SDE Karras'
-        req2.denoising_strength = 0.25 #denoising_strength
         req2.width = round(width * scale / 8) * 8
         req2.height = round(height * scale / 8) * 8
+        is_hd = max(req2.width, req2.height) > 1200
+        req2.denoising_strength = 0.3 if is_hd else 0.25
+        req2.steps = 12 if is_hd else 10
         req2.init_images = [pass2_input_b64]
         # req2.restore_faces = True
         if seed:
@@ -303,12 +304,10 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
                 cn_image_pil = sd_image_pil
             elif bg_blur_radius > 0: 
                 # avatar:
-                # blur background for controlnet input
-                print("[/bgremove/avatar] blur background for controlnet input")
-                sd_image_pil = resize(input_image_pil, pass1_size)
-                cn_image_pil = ImageModule.fromarray(remover.process(input_image_pil, 'blur', 30))
-                cn_image_pil = cn_image_pil.filter(ImageFilter.UnsharpMask(3, 150, 2))
-                cn_image_pil = resize(cn_image_pil, pass1_size)
+                print("[/bgremove/avatar] blur background for sd and controlnet")
+                sd_image_pil = resize(ImageModule.fromarray(remover.process(input_image_pil, 'blur', bg_blur_radius)), pass1_size)
+                cn_image_pil = sd_image_pil
+                # cn_image_pil = cn_image_pil.filter(ImageFilter.UnsharpMask(3, 150, 2))
                 if mask_pil:
                     mask_pil = resize(mask_pil, pass1_size)
             else: 
