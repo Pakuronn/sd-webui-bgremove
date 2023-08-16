@@ -302,7 +302,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
                 # sticker:
                 sd_image_pil = input_image_pil
                 cn_image_pil = sd_image_pil
-            elif bg_blur_radius > 0: 
+            elif bg_blur_radius > 0 and faces_count > 0: # размываем фон только если в кадре есть люди
                 # avatar:
                 print("[/bgremove/avatar] blur background for sd and controlnet")
                 sd_image_pil = resize(ImageModule.fromarray(remover.process(input_image_pil, 'blur', bg_blur_radius)), pass1_size)
