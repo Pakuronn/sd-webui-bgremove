@@ -126,6 +126,14 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
     ##############
 
 
+    def calc_denoising_strength(
+        height: int,
+        face_height: int,
+        config: str # "20-90:0.2-0.3"
+    ):
+        [h1,h2], [d1,d2] = [s.split("-") for s in config.split(":")]
+        return float(d1) + (float(d2)-float(d1)) * smoothclamp(100 * face_height / height, float(h1), float(h2))        
+
     def do_pass1(
         scale: float, 
         prompt: str, 
@@ -134,7 +142,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         image_cn: ImageModule.Image,
         image_mask: ImageModule.Image|None,
         sd: dict[str, Any], 
-        controlnet: dict[str, Any],
+        controlnet: dict[str, Any]|None,
         face_height: int,
     ):
         ### make img2img call:
@@ -152,8 +160,11 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         req.prompt = prompt #prompt_patched
         req.negative_prompt = negative_prompt
         req.steps = sd['steps'] if 'steps' in sd else 25
-        req.sampler_index = sd['sampler_index'] if 'sampler_index' in sd else 'Euler a'
-        req.denoising_strength = 1 if 'denoising_strength' not in sd else sd['denoising_strength']
+        req.sampler_index = sd['sampler_name'] if 'sampler_name' in sd else 'Euler a'
+        if 'denoising_strength_config' in sd:
+            req.denoising_strength = calc_denoising_strength(height, face_height, sd['denoising_strength_config'])
+        else:
+            req.denoising_strength = sd['denoising_strength'] if 'denoising_strength' in sd else 1
         req.cfg_scale = 7 if 'cfg_scale' not in sd else sd['cfg_scale']
         if 'seed' in sd:
             req.seed = sd['seed']
@@ -165,18 +176,19 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
             req.inpainting_fill = 1 # !!! FIXED
             req.inpainting_mask_invert = 1
 
-        req.alwayson_scripts = {
-            "ControlNet": {
-                "args": [{
-                    "image": pil_to_base64(image_cn),
-                    "module": "softedge_hed",
-                    "model": "control_v11p_sd15_softedge [a8575a2a]", #"control_sd15_hed [fef5e48e]",
-                    "weight": 0.5,
-                    "control_mode": 0,
-                    "processor_res": 512,
-                } | controlnet]
+        if controlnet != None and 'weight' in controlnet:
+            req.alwayson_scripts = {
+                "ControlNet": {
+                    "args": [{
+                        "image": pil_to_base64(image_cn),
+                        "module": "softedge_hed",
+                        "model": "control_v11p_sd15_softedge [a8575a2a]", #"control_sd15_hed [fef5e48e]",
+                        "weight": 0.5,
+                        "control_mode": 0,
+                        "processor_res": 512,
+                    } | controlnet]
+                }
             }
-        }
 
         ### call img2img
         print('[/bgremove/avatar] pass1', req.prompt)
