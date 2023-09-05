@@ -122,6 +122,11 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         _req: Any
         _err: Any
 
+    class ImageResponse(TypedDict, total=False):
+        images: list[str]
+        _req: Any
+        _err: Any
+
 
     ##############
 
@@ -132,7 +137,8 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         config: str # "20-90:0.2-0.3"
     ):
         [h1,h2], [d1,d2] = [s.split("-") for s in config.split(":")]
-        return float(d1) + (float(d2)-float(d1)) * smoothclamp(100 * face_height / height, float(h1), float(h2))        
+        step = smoothclamp(face_height / height, float(h1)/100, float(h2)/100)
+        return float(d1) + (float(d2)-float(d1)) * step
 
     def do_pass1(
         scale: float, 
@@ -163,6 +169,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         req.sampler_index = sd['sampler_name'] if 'sampler_name' in sd else 'Euler a'
         if 'denoising_strength_config' in sd:
             req.denoising_strength = calc_denoising_strength(height, face_height, sd['denoising_strength_config'])
+            print('[do_pass1.denoising_strength_config]', height, face_height, sd['denoising_strength_config'], req.denoising_strength)
         else:
             req.denoising_strength = sd['denoising_strength'] if 'denoising_strength' in sd else 1
         req.cfg_scale = 7 if 'cfg_scale' not in sd else sd['cfg_scale']
@@ -259,6 +266,39 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         return mask_pil, faces_count, face_height
     
 
+    @app.post("/bgremove/bgremove")
+    def bgremove(
+        response: Response,
+        input_image: str = Body("", title='Input Image'),
+        bg_blur_radius: int = Body(0, title="Blur Radius"),
+        output_size: int = Body(PASS2_IMAGE_SIZE, title="Output size (bigger side, default is 1024)")
+    ) -> ImageResponse:
+        try:
+            print('[/bgremove/bgremove] STARTED', output_size, bg_blur_radius)
+            input_image_pil = base64_to_pil(input_image)
+            input_image_pil = resize(input_image_pil, DETECT_IMAGE_SIZE)
+            #input_image_pil = gamma(input_image_pil, 0.8, 0.95)
+
+            # remove background
+            if bg_blur_radius:
+                output_image_pil = ImageModule.fromarray(remover.process(input_image_pil, 'blur', bg_blur_radius))
+            else:
+                output_image_pil = ImageModule.fromarray(remover.process(input_image_pil))
+                output_image_pil = crop(output_image_pil)
+                output_image_pil = fit_to_size(output_image_pil, output_size, (255,255,255,0))
+            output_image_b64 = pil_to_base64(output_image_pil)
+            return {
+                "images": [output_image_b64]
+            }
+        except Exception as err:
+            response.status_code = 500
+            exc_info = sys.exc_info()
+            print('[/bgremove/bgremove] catchedError', exc_info, traceback.format_exception(*exc_info))
+            return {
+                "_err": traceback.format_exception(*exc_info)
+            }
+            
+
     @app.post("/bgremove/avatar2")
     def avatar2(
         response: Response,
@@ -271,6 +311,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
         bg_remove: bool = Body(False, title="Inpaint faces"),
         bg_blur_radius: int = Body(0, title="Blur Radius"),
         faces_restore: bool = Body(False, title="Restore faces from source photo"),
+        faces_inpaint: bool = Body(False, title="Inpaint only faces"),
         debug: bool = Body(True, title="Return intermediate images"),
         detect_gender: bool = Body(False, title="Fine-tune prompt based on detected gender and age"),
         output_size: int = Body(PASS2_IMAGE_SIZE, title="Output size (bigger side, default is 1024)")
@@ -295,10 +336,12 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
                 bgmask_pil = None
 
             ### build face mask for inpaint
-            if faces_restore:
+            if faces_restore or faces_inpaint:
                 mask_pil, faces_count, face_height = make_faces_mask(input_image_pil, pass1_size)
             else:
                 mask_pil, faces_count, face_height = None, 0, 0
+            if faces_inpaint and mask_pil:
+                mask_pil = ImageOps.invert(mask_pil)
 
             pass2_needed = faces_restore and mask_pil and faces_count > 0
 
