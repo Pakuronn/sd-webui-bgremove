@@ -8,6 +8,7 @@ from PIL import ImageFilter, Image as ImageModule, ImageStat, ImageOps, ImageCho
 import traceback
 import sys
 import platform
+import cv2
 
 from modules.api.models import *
 from modules.api import api, models
@@ -99,6 +100,31 @@ def is_grayscale_masked(input: ImageModule.Image, mask: ImageModule.Image):
     # print('[is_grayscale_masked]', area)
     # print(round(r,2), round(g,2), round(b,2), round(diff,2), treshold)
     return True if diff < treshold else False
+
+def extend_face_masks(image_pil: ImageModule.Image, vertical_blur: int) -> ImageModule.Image:
+    image = np.asarray(image_pil)
+
+    # kernel for vertical blur
+    kernel_vblur = np.zeros((vertical_blur, vertical_blur))
+    kernel_vblur[:, int((vertical_blur-1)/2)] = np.ones(vertical_blur)
+    kernel_vblur = kernel_vblur / vertical_blur
+
+    # kernel for horizontal blur
+    horiz_blur = vertical_blur // 2
+    kernel_hblur = np.zeros((horiz_blur, horiz_blur))
+    kernel_hblur[int((horiz_blur-1)/2), :] = np.ones(horiz_blur)
+    kernel_hblur = kernel_hblur / horiz_blur
+
+    # LUT
+    lut = np.array([ 255 if i > 127 else i*2 for i in range (0,256)]).clip(0,255).astype('uint8')
+
+    # apply filters to image
+    output = cv2.filter2D(image, -1, kernel_vblur)
+    output = cv2.filter2D(output, -1, kernel_hblur)
+    output = cv2.LUT(output, lut)
+
+    return ImageModule.fromarray(output)
+
 
 def bgremove_api(_: gr.Blocks, app: FastAPI):
 
@@ -341,6 +367,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
             else:
                 mask_pil, faces_count, face_height = None, 0, 0
             if faces_inpaint and mask_pil:
+                mask_pil = extend_face_masks(mask_pil, int(face_height/2))
                 mask_pil = ImageOps.invert(mask_pil)
 
             pass2_needed = faces_restore and mask_pil and faces_count > 0
