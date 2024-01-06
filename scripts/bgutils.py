@@ -4,6 +4,25 @@ from PIL import Image as ImageModule, ImageFilter, ImageDraw #, ImageFont, Image
 from PIL.Image import Image
 from deepface import DeepFace
 import numpy as np
+
+# new face detector from reactor
+import copy
+import os
+import insightface
+
+try:
+    from modules.paths_internal import models_path
+except:
+    try:
+        from modules.paths import models_path
+    except:
+        model_path = os.path.abspath("models")
+
+class dotdict(dict):
+    __getattr__ = dict.get
+    __setattr__ = dict.__setitem__ #type: ignore
+    __delattr__ = dict.__delitem__ #type: ignore
+
 # import cv2 as cv
 # import numpy
 
@@ -247,6 +266,54 @@ def detect_faces(input: Image) -> Tuple[str, list]:
     except Exception as err:
         print('[detect_faces] ERROR: Couldn`t detect face', err)
         return ('', [])
+
+def detect_faces2(input: Image) -> Tuple[str, list]:
+    try:
+        img_data = np.array(input)
+        info = analyze_faces(img_data, det_size=(640, 640))
+        # info = [{'bbox': array([348.3973, 285.73175, 691.8422, 715.98303], dtype=Float32), 'kps': arrayCI[398.7142, 485.414 ], ...}]
+        #[detect_faces2] faces2 [{'dominant_gender': 'Man', 'age': 42, 'x': 340.333, 'y': 285.07568, 'width': 349.18115, 'height': 435.90186}]
+        faces = [dotdict(
+                dominant_gender = 'Man' if f['gender'] == 1 else 'Woman', 
+                age = f['age'],
+                x = f['bbox'][0],
+                y = f['bbox'][1],
+                width = f['bbox'][2] - f['bbox'][0],
+                height = f['bbox'][3] - f['bbox'][1]
+            ) for f in info]
+        print('[detect_faces2] faces', faces)
+        faces2 = sorted(faces, key=lambda x: x['width'], reverse=True)[0:2]
+        faces2.sort(key=lambda x: x['x'])
+        print('[detect_faces2] faces2', faces2)
+        if len(faces2) == 2:
+            face_prompt = face2prompt(faces2[0]) + ' on left and ' + face2prompt(faces2[1]) + ' on right'
+        elif len(faces2) == 1:
+            face_prompt = face2prompt(faces2[0])
+        else:
+            face_prompt = ''
+        return (face_prompt, faces)
+    except Exception as err:
+        print('[detect_faces2] ERROR: Couldn`t detect face', err)
+        return ('', [])
+
+ANALYSIS_MODEL = insightface.app.FaceAnalysis(
+    name="buffalo_l", 
+    providers=["CPUExecutionProvider"], 
+    root=os.path.join(models_path, "insightface") # note: allowed_modules=['detection', 'genderage']
+)
+
+def getAnalysisModel():
+    # if ANALYSIS_MODEL is None:
+    #     ANALYSIS_MODEL = insightface.app.FaceAnalysis(
+    #         name="buffalo_l", providers=["CPUExecutionProvider"], root=os.path.join(models_path, "insightface") # note: allowed_modules=['detection', 'genderage']
+    #     )
+    return ANALYSIS_MODEL
+
+def analyze_faces(img_data: np.ndarray, det_size=(640, 640)):
+    face_analyser = copy.deepcopy(getAnalysisModel())
+    face_analyser.prepare(ctx_id=0, det_size=det_size)
+    return face_analyser.get(img_data)
+
 
 # def sharpen(input: Image):
     # cv2::GaussianBlur(frame, image, cv::Size(0, 0), 3);

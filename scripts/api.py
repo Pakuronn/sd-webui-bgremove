@@ -16,10 +16,10 @@ from modules.call_queue import queue_lock  # noqa: F401
 
 # from scripts.logging import logger
 from scripts.Remover import Remover
-from scripts.bgutils import detect_faces, gamma, resize, crop, fit_to_size
+from scripts.bgutils import detect_faces2, gamma, resize, crop, fit_to_size
 from scripts.face_detect import FaceDetectConfig, FaceMode, findFaces, findFaces2
 
-HOSTNAME_PENS = 'DESKTOP-0PN01Q5'
+HOSTNAME_PENS = 'Pens-PC'
 IS_PROD = platform.node() != HOSTNAME_PENS
 
 class dotdict(dict):
@@ -323,7 +323,8 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
             return {
                 "_err": traceback.format_exception(*exc_info)
             }
-            
+
+####################################################################
 
     @app.post("/bgremove/avatar2")
     def avatar2(
@@ -375,7 +376,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
             ### fine-tune prompt
             if faces_count > 0 and detect_gender:
                 print('[/bgremove/avatar] fine-tune prompt', faces_count)
-                prompt_faces, _ = detect_faces(input_image_pil)
+                prompt_faces, _ = detect_faces2(input_image_pil)
                 prompt_patched = '('+prompt_faces+'), ' + prompt if prompt_faces else prompt
             else:
                 prompt_patched = prompt
@@ -426,7 +427,7 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
                 scale = 1 if bg_remove else output_size / pass1_size
                 pass2_output = do_pass2(
                     scale, 
-                    prompt if prompt_pass2 == "" else prompt_pass2, 
+                    prompt_patched if prompt_pass2 == "" else prompt_pass2, 
                     face_height, 
                     sd_image_pil, 
                     pass1_output, 
@@ -459,6 +460,8 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
             return {
                 "_err": traceback.format_exception(*exc_info)
             }
+
+####################################################################
 
 try:
     import modules.script_callbacks as script_callbacks
