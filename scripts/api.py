@@ -323,7 +323,35 @@ def bgremove_api(_: gr.Blocks, app: FastAPI):
             return {
                 "_err": traceback.format_exception(*exc_info)
             }
+            
+####################################################################
 
+    class DetectGenderResponse(TypedDict, total=False):
+        gender: list[str]
+        _req: Any
+        _err: Any
+
+    @app.post("/bgremove/detect_gender")
+    def detect_gender(
+        response: Response,
+        input_image: str = Body("", title='Input Image'),
+    ) -> DetectGenderResponse:
+        try:
+            print('[/bgremove/detect_gender] STARTED')
+            input_image_pil = base64_to_pil(input_image)
+            input_image_pil = resize(input_image_pil, DETECT_IMAGE_SIZE)
+            face_gender, _ = detect_faces2(input_image_pil)
+            return {
+                "gender": [face_gender.split(' ')[0]]
+            }
+        except Exception as err:
+            response.status_code = 500
+            exc_info = sys.exc_info()
+            print('[/bgremove/detect_gender] catchedError', exc_info, traceback.format_exception(*exc_info))
+            return {
+                "_err": traceback.format_exception(*exc_info)
+            }
+            
 ####################################################################
 
     @app.post("/bgremove/avatar2")
